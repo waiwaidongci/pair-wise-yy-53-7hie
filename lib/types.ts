@@ -13,6 +13,13 @@ export interface LicenseWindow {
   exclusive: boolean
   sublicense: boolean
   priority: number
+  /**
+   * 授权窗口版本号。每次对方/我方修改独占范围或排期都会递增。
+   * 旧稿没有版本号（undefined），按原状态兼容，读取时统一用 windowRev 视为 0。
+   */
+  rev?: number
+  /** 最近一次修改人/角色，用于提示“该窗口已被对方改过”。 */
+  lastEditor?: string
   status: '草案' | '冲突' | '已确认'
 }
 

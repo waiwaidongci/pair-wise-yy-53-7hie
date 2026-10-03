@@ -1,21 +1,27 @@
 'use client'
 
-import { Box, Flex, Grid, Heading, Text, Badge, Button, Table, Thead, Tbody, Tr, Th, Td, Progress } from '@chakra-ui/react'
+import { Box, Flex, Grid, Heading, Text, Badge, Button, HStack, Table, Thead, Tbody, Tr, Th, Td, Progress } from '@chakra-ui/react'
 import Link from 'next/link'
 import { useRightsStore, useConflicts } from '@/store/rights'
 import { trpc } from '@/trpc/client'
+import { deriveBatchStatus, revLabel, summarizeBatch } from '@/lib/batch'
+import { windowBatchState } from '@/lib/approval'
+
+const batchColor: Record<string, string> = { 已生效: 'green', 已挂起: 'orange', 写入失败: 'red', 已取消: 'gray' }
 
 export default function Dashboard() {
   const windows = useRightsStore((state) => state.windows)
   const comments = useRightsStore((state) => state.comments)
   const version = useRightsStore((state) => state.version)
+  const latestBatch = useRightsStore((state) => state.latestBatch)
   const conflicts = useConflicts()
   const catalog = trpc.catalog.useQuery()
+  const batchSummary = latestBatch ? summarizeBatch(latestBatch) : null
   const cards = [
     { label: '授权窗口', value: windows.length, note: `${catalog.data?.works.length ?? 2} 部作品` },
     { label: '责任地区', value: new Set(windows.map((item) => item.territory)).size, note: '联动地区矩阵' },
-    { label: '高优先级冲突', value: conflicts.filter((item) => item.severity === '高').length, note: '阻止审批通过' },
-    { label: '当前草案', value: `v${version}`, note: '自动保留本地版本' },
+    { label: '高优先级冲突', value: conflicts.filter((item) => item.severity === '高').length, note: '按当前版本实时重算' },
+    { label: '当前草案', value: `v${version}`, note: latestBatch ? `最新批次：${deriveBatchStatus(latestBatch)}` : '尚无调窗批次' },
   ]
   return (
     <Box>
@@ -44,9 +50,20 @@ export default function Dashboard() {
           <Text color="gray.500" fontSize="xs" mt={2}>规则完备度 {Math.max(0, 100 - conflicts.length * 18)}% · {comments.filter((item) => !item.resolved).length} 条意见待处理</Text>
         </Box>
       </Grid>
+      {latestBatch && batchSummary && (
+        <Box bg="white" border="1px solid" borderColor="gray.200" borderLeft="4px solid" borderLeftColor={batchSummary.failed ? 'red.500' : batchSummary.parked ? 'orange.400' : 'green.500'} borderRadius="8px" p={4} mb={4}>
+          <Flex justify="space-between" flexWrap="wrap" gap={2}>
+            <Box>
+              <Text fontWeight="700">最新调窗批次 {latestBatch.id} · {deriveBatchStatus(latestBatch)}</Text>
+              <Text color="gray.500" fontSize="sm">已生效 {batchSummary.applied} 笔 · 挂起保留对方版本 {batchSummary.parked} 笔 · 写入失败 {batchSummary.failed} 笔 · 待提交 {batchSummary.pending} 笔（恢复时已生效窗口不重复顺延）</Text>
+            </Box>
+            <Button as={Link} href="/windows" size="sm" variant="outline">{batchSummary.failed ? '去恢复批次' : batchSummary.parked ? '去处理挂起笔' : '查看批次'}</Button>
+          </Flex>
+        </Box>
+      )}
       <Box bg="white" border="1px solid" borderColor="gray.200" borderRadius="8px" overflow="hidden">
-        <Flex p={4} justify="space-between"><Heading size="md">待决授权条款</Heading><Button size="sm" variant="ghost">查看全部</Button></Flex>
-        <Table size="sm"><Thead><Tr><Th>作品 / 渠道</Th><Th>权利</Th><Th>地区</Th><Th>窗口</Th><Th>独占</Th><Th>状态</Th></Tr></Thead><Tbody>{windows.map((item) => <Tr key={item.id}><Td><Text fontWeight="600">{item.work}</Text><Text color="gray.500" fontSize="xs">{item.channel} · {item.id}</Text></Td><Td>{item.rights}</Td><Td>{item.territory}</Td><Td>{item.start} → {item.end}</Td><Td><Badge colorScheme={item.exclusive ? 'purple' : 'gray'}>{item.exclusive ? '独占' : '非独占'}</Badge></Td><Td><Badge colorScheme={item.status === '冲突' ? 'red' : item.status === '已确认' ? 'green' : 'orange'}>{item.status}</Badge></Td></Tr>)}</Tbody></Table>
+        <Flex p={4} justify="space-between"><Box><Heading size="md">待决授权条款</Heading><Text color="gray.500" fontSize="sm">按最新批次显示每笔处置；旧稿（无版本号）保留原状态。</Text></Box><Button size="sm" variant="ghost" as={Link} href="/windows">查看全部</Button></Flex>
+        <Table size="sm"><Thead><Tr><Th>作品 / 渠道</Th><Th>权利</Th><Th>地区</Th><Th>窗口</Th><Th>独占 / 版本</Th><Th>批次处置</Th><Th>状态</Th></Tr></Thead><Tbody>{windows.map((item) => { const batchState = windowBatchState(latestBatch, item.id); return <Tr key={item.id}><Td><Text fontWeight="600">{item.work}</Text><Text color="gray.500" fontSize="xs">{item.channel} · {item.id}{item.lastEditor ? ` · ${item.lastEditor}改` : ''}</Text></Td><Td>{item.rights}</Td><Td>{item.territory}</Td><Td>{item.start} → {item.end}</Td><Td><HStack><Badge colorScheme={item.exclusive ? 'purple' : 'gray'}>{item.exclusive ? '独占' : '非独占'}</Badge><Badge colorScheme={item.rev === undefined ? 'blackAlpha' : 'blue'} variant={item.rev === undefined ? 'subtle' : 'solid'}>{revLabel(item)}</Badge></HStack></Td><Td>{batchState ? <Badge colorScheme={batchColor[batchState] ?? 'gray'}>{batchState}</Badge> : <Text color="gray.400">—</Text>}</Td><Td><Badge colorScheme={item.status === '冲突' ? 'red' : item.status === '已确认' ? 'green' : 'orange'}>{item.status}</Badge></Td></Tr> })}</Tbody></Table>
       </Box>
     </Box>
   )

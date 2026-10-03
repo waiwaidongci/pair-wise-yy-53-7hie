@@ -3,19 +3,31 @@
 import { useMemo, useState } from 'react'
 import { Box, Flex, Grid, Heading, Text, Badge, Button, Input, Select, Checkbox, Table, Thead, Tbody, Tr, Th, Td, useToast, HStack } from '@chakra-ui/react'
 import { useRightsStore, useConflicts } from '@/store/rights'
+import { BatchPanel, RoleSwitch } from '@/components/BatchPanel'
+import { revLabel } from '@/lib/batch'
+import { windowBatchState } from '@/lib/approval'
 import type { Territory } from '@/lib/types'
 
 const territories: (Territory | '全部地区')[] = ['全部地区', '中国大陆', '中国香港', '中国台湾', '新加坡', '马来西亚', '北美']
 
+const batchStateColor: Record<string, string> = {
+  已生效: 'green',
+  已挂起: 'orange',
+  写入失败: 'red',
+  已取消: 'gray',
+}
+
 export default function WindowsPage() {
   const windows = useRightsStore((state) => state.windows)
   const updateWindow = useRightsStore((state) => state.updateWindow)
-  const batchShift = useRightsStore((state) => state.batchShift)
+  const prepareBatch = useRightsStore((state) => state.prepareBatch)
+  const latestBatch = useRightsStore((state) => state.latestBatch)
   const selectedWindowId = useRightsStore((state) => state.selectedWindowId)
   const selectWindow = useRightsStore((state) => state.selectWindow)
   const selectedTerritory = useRightsStore((state) => state.selectedTerritory)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [shiftDays, setShiftDays] = useState(7)
+  const [failWindowId, setFailWindowId] = useState('')
   const toast = useToast()
   const conflicts = useConflicts()
   const filtered = useMemo(() => selectedTerritory === '全部地区' ? windows : windows.filter((item) => item.territory === selectedTerritory), [windows, selectedTerritory])
@@ -26,18 +38,31 @@ export default function WindowsPage() {
     if (new Date(selected.end) < new Date(selected.start)) return toast({ title: '窗口无效', description: '结束日期不能早于开始日期。', status: 'error' })
     const collision = conflicts.find((issue) => issue.windowIds.includes(selected.id))
     updateWindow(selected.id, { status: collision ? '冲突' : '已确认' })
-    toast({ title: collision ? '已保存，仍存在冲突' : '窗口已确认', description: collision?.explanation ?? '授权窗口已通过规则校验。', status: collision ? 'warning' : 'success' })
+    toast({ title: collision ? '已保存，仍存在冲突' : '窗口已确认', description: collision?.explanation ?? '授权窗口已通过规则校验，版本号已递增。', status: collision ? 'warning' : 'success' })
   }
+
+  function generatePreview() {
+    if (!selectedIds.length) return toast({ title: '请选择窗口', status: 'warning' })
+    const batch = prepareBatch(selectedIds, shiftDays)
+    toast({ title: '已用授权窗口当前版本生成预览', description: `${batch.id}：${batch.items.length} 笔，提交前不会改动窗口。`, status: 'info' })
+  }
+
   return (
     <Box>
-      <Flex justify="space-between" mb={5} gap={4} direction={{ base: 'column', md: 'row' }}><Box><Text color="brand.600" fontSize="xs" fontWeight="bold">TIME × TERRITORY</Text><Heading fontSize="3xl" my={1}>授权窗口与地区矩阵</Heading><Text color="gray.600">窗口和地区联动筛选，批量调整后即时重算独占、重叠与倒挂冲突。</Text></Box><Flex gap={2}><Select maxW="150px" value={selectedTerritory} onChange={(event) => useRightsStore.setState({ selectedTerritory: event.target.value })}>{territories.map((territory) => <option key={territory}>{territory}</option>)}</Select><Button colorScheme="blue" onClick={validateAndSave}>校验并保存</Button></Flex></Flex>
+      <Flex justify="space-between" mb={5} gap={4} direction={{ base: 'column', md: 'row' }}><Box><Text color="brand.600" fontSize="xs" fontWeight="bold">TIME × TERRITORY</Text><Heading fontSize="3xl" my={1}>授权窗口与地区矩阵</Heading><Text color="gray.600">窗口按版本号做乐观并发控制；批量调窗先生成可恢复批次，对席改过的窗口保留对方版本并挂起。</Text></Box><Flex gap={2}><RoleSwitch /><Select maxW="150px" value={selectedTerritory} onChange={(event) => useRightsStore.setState({ selectedTerritory: event.target.value })}>{territories.map((territory) => <option key={territory}>{territory}</option>)}</Select><Button colorScheme="blue" onClick={validateAndSave}>校验并保存</Button></Flex></Flex>
+
+      <Box mb={4}><BatchPanel failWindowId={failWindowId} setFailWindowId={setFailWindowId} /></Box>
+
       <Grid templateColumns={{ base: '1fr', xl: 'minmax(0,1.1fr) minmax(360px,.8fr)' }} gap={4}>
         <Box bg="white" border="1px solid" borderColor="gray.200" borderRadius="8px" overflow="hidden">
-          <Flex p={4} justify="space-between" align="center"><Heading size="md">授权窗口清单</Heading><HStack><Select size="sm" w="110px" value={shiftDays} onChange={(event) => setShiftDays(Number(event.target.value))}><option value={7}>+7 天</option><option value={14}>+14 天</option><option value={-7}>-7 天</option><option value={-14}>-14 天</option></Select><Button size="sm" onClick={() => { if (!selectedIds.length) return toast({ title: '请选择窗口', status: 'warning' }); batchShift(selectedIds, shiftDays) }}>批量调窗</Button></HStack></Flex>
-          <Table size="sm"><Thead><Tr><Th w="36px"></Th><Th>作品 / 渠道</Th><Th>地区</Th><Th>开始</Th><Th>结束</Th><Th>独占</Th></Tr></Thead><Tbody>{filtered.map((item) => <Tr key={item.id} bg={selectedWindowId === item.id ? 'blue.50' : undefined} cursor="pointer" onClick={() => selectWindow(item.id)}><Td onClick={(event) => event.stopPropagation()}><Checkbox isChecked={selectedIds.includes(item.id)} onChange={(event) => setSelectedIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} /></Td><Td><Text fontWeight="600">{item.work}</Text><Text color="gray.500" fontSize="xs">{item.channel} · {item.id}</Text></Td><Td>{item.territory}</Td><Td>{item.start}</Td><Td>{item.end}</Td><Td><Badge colorScheme={item.exclusive ? 'purple' : 'gray'}>{item.exclusive ? '独占' : '普通'}</Badge></Td></Tr>)}</Tbody></Table>
+          <Flex p={4} justify="space-between" align="center"><Heading size="md">授权窗口清单</Heading><HStack><Select size="sm" w="110px" value={shiftDays} onChange={(event) => setShiftDays(Number(event.target.value))}><option value={7}>+7 天</option><option value={14}>+14 天</option><option value={-7}>-7 天</option><option value={-14}>-14 天</option></Select><Button size="sm" colorScheme="blue" onClick={generatePreview}>生成调窗预览</Button></HStack></Flex>
+          <Table size="sm"><Thead><Tr><Th w="36px"></Th><Th>作品 / 渠道</Th><Th>地区</Th><Th>开始</Th><Th>结束</Th><Th>独占 / 版本</Th></Tr></Thead><Tbody>{filtered.map((item) => {
+            const batchState = windowBatchState(latestBatch, item.id)
+            return <Tr key={item.id} bg={selectedWindowId === item.id ? 'blue.50' : undefined} cursor="pointer" onClick={() => selectWindow(item.id)}><Td onClick={(event) => event.stopPropagation()}><Checkbox isChecked={selectedIds.includes(item.id)} onChange={(event) => setSelectedIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} /></Td><Td><Text fontWeight="600">{item.work}</Text><Text color="gray.500" fontSize="xs">{item.channel} · {item.id}{item.lastEditor ? ` · ${item.lastEditor}改` : ''}</Text></Td><Td>{item.territory}</Td><Td>{item.start}</Td><Td>{item.end}</Td><Td><HStack><Badge colorScheme={item.exclusive ? 'purple' : 'gray'}>{item.exclusive ? '独占' : '普通'}</Badge><Badge colorScheme={item.rev === undefined ? 'blackAlpha' : 'blue'} variant={item.rev === undefined ? 'subtle' : 'solid'}>{revLabel(item)}</Badge>{batchState && <Badge colorScheme={batchStateColor[batchState] ?? 'gray'}>{batchState}</Badge>}</HStack></Td></Tr>
+          })}</Tbody></Table>
         </Box>
         <Box bg="white" border="1px solid" borderColor="gray.200" borderRadius="8px" p={5}>
-          <Heading size="md" mb={1}>窗口条款</Heading><Text color="gray.500" fontSize="sm" mb={4}>{selected?.id ?? '请选择窗口'}</Text>
+          <Heading size="md" mb={1}>窗口条款</Heading><Text color="gray.500" fontSize="sm" mb={4}>{selected?.id ?? '请选择窗口'}{selected ? ` · 当前 ${revLabel(selected)}` : ''}</Text>
           {selected && <Grid templateColumns="1fr 1fr" gap={4}>
             <Box gridColumn="span 2"><Text fontSize="sm" mb={1}>渠道</Text><Input value={selected.channel} onChange={(event) => updateWindow(selected.id, { channel: event.target.value })} /></Box>
             <Box><Text fontSize="sm" mb={1}>开始日期</Text><Input type="date" value={selected.start} onChange={(event) => updateWindow(selected.id, { start: event.target.value })} /></Box>
