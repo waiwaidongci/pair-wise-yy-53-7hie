@@ -1,14 +1,15 @@
 'use client'
 
-import { Box, Flex, Grid, Heading, Text, Badge, Button, Table, Thead, Tbody, Tr, Th, Td, Progress } from '@chakra-ui/react'
+import { Box, Flex, Grid, Heading, Text, Badge, Button, HStack, Table, Thead, Tbody, Tr, Th, Td, Progress } from '@chakra-ui/react'
 import Link from 'next/link'
-import { useRightsStore, useConflicts } from '@/store/rights'
+import { useRightsStore, useConflicts, useLatestBatch } from '@/store/rights'
 import { trpc } from '@/trpc/client'
 
 export default function Dashboard() {
   const windows = useRightsStore((state) => state.windows)
   const comments = useRightsStore((state) => state.comments)
   const version = useRightsStore((state) => state.version)
+  const latestBatch = useLatestBatch()
   const conflicts = useConflicts()
   const catalog = trpc.catalog.useQuery()
   const cards = [
@@ -45,7 +46,7 @@ export default function Dashboard() {
         </Box>
       </Grid>
       <Box bg="white" border="1px solid" borderColor="gray.200" borderRadius="8px" overflow="hidden">
-        <Flex p={4} justify="space-between"><Heading size="md">待决授权条款</Heading><Button size="sm" variant="ghost">查看全部</Button></Flex>
+        <Flex p={4} justify="space-between" align="center" flexWrap="wrap" gap={2}><Heading size="md">待决授权条款</Heading><HStack><Text fontSize="xs" color="gray.500">按最新批次显示</Text>{latestBatch && <Badge colorScheme={latestBatch.status === '已生效' ? 'green' : latestBatch.status === '失败' ? 'red' : 'orange'}>{latestBatch.id} · {latestBatch.status}</Badge>}<Button size="sm" variant="ghost">查看全部</Button></HStack></Flex>
         <Table size="sm"><Thead><Tr><Th>作品 / 渠道</Th><Th>权利</Th><Th>地区</Th><Th>窗口</Th><Th>独占</Th><Th>状态</Th></Tr></Thead><Tbody>{windows.map((item) => <Tr key={item.id}><Td><Text fontWeight="600">{item.work}</Text><Text color="gray.500" fontSize="xs">{item.channel} · {item.id}</Text></Td><Td>{item.rights}</Td><Td>{item.territory}</Td><Td>{item.start} → {item.end}</Td><Td><Badge colorScheme={item.exclusive ? 'purple' : 'gray'}>{item.exclusive ? '独占' : '非独占'}</Badge></Td><Td><Badge colorScheme={item.status === '冲突' ? 'red' : item.status === '已确认' ? 'green' : 'orange'}>{item.status}</Badge></Td></Tr>)}</Tbody></Table>
       </Box>
     </Box>

@@ -2,25 +2,44 @@
 
 import { useState } from 'react'
 import { Box, Flex, Grid, Heading, Text, Badge, Button, Textarea, Checkbox, Tabs, TabList, Tab, TabPanels, TabPanel, useToast, HStack } from '@chakra-ui/react'
-import { useRightsStore } from '@/store/rights'
+import { useRightsStore, useConflicts, useLatestBatch } from '@/store/rights'
 import { versions } from '@/lib/mock-data'
 
 export default function ReviewsPage() {
   const comments = useRightsStore((state) => state.comments)
   const acceptComment = useRightsStore((state) => state.acceptComment)
+  const version = useRightsStore((state) => state.version)
+  const windows = useRightsStore((state) => state.windows)
+  const latestBatch = useLatestBatch()
+  const conflicts = useConflicts()
   const [draft, setDraft] = useState('流媒体开窗日期以院线独占结束次日为准，并单独拆分港澳台物料。')
   const [accepted, setAccepted] = useState<string[]>(['RW-102 开窗日期由 11-15 调整为 11-20'])
   const toast = useToast()
 
   function exportPackage() {
-    const report = { version: 'v18', generatedAt: new Date().toISOString(), accepted, unresolved: comments.filter((item) => !item.resolved).map((item) => ({ anchor: item.anchor, author: item.author, content: item.content })) }
+    const report = {
+      version: `v${version}`,
+      generatedAt: new Date().toISOString(),
+      latestBatch: latestBatch
+        ? {
+            id: latestBatch.id,
+            status: latestBatch.status,
+            days: latestBatch.days,
+            items: latestBatch.items.map((item) => ({ windowId: item.windowId, status: item.status, reason: item.reason ?? null })),
+          }
+        : null,
+      windows: windows.map((item) => ({ id: item.id, channel: item.channel, territory: item.territory, start: item.start, end: item.end, exclusive: item.exclusive, version: item.version })),
+      conflicts: conflicts.map((item) => ({ type: item.type, severity: item.severity, title: item.title, windowIds: item.windowIds })),
+      accepted,
+      unresolved: comments.filter((item) => !item.resolved).map((item) => ({ anchor: item.anchor, author: item.author, content: item.content })),
+    }
     const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' })
     const link = document.createElement('a')
     link.href = URL.createObjectURL(blob)
-    link.download = '发行权审批包-v18.json'
+    link.download = `发行权审批包-v${version}.json`
     link.click()
     URL.revokeObjectURL(link.href)
-    toast({ title: '审批包已导出', status: 'success' })
+    toast({ title: '审批包已导出', description: `已按最新批次 ${latestBatch?.id ?? '无'} 与当前冲突结果导出。`, status: 'success' })
   }
   return (
     <Box>
